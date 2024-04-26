@@ -1,11 +1,9 @@
 import argparse
 import csv
-from datasets import load_dataset, DatasetDict, Dataset
+from datasets import Dataset
 from datetime import datetime
 from dotenv import load_dotenv
-import fitz
 import json
-import nltk
 from nltk.tokenize import sent_tokenize
 import openai
 import os
@@ -31,7 +29,6 @@ def parse_arguments():
     parser.add_argument('--start_date', type=str, default='2023-01-01', help='Start date in YYYY-MM-DD format')
     parser.add_argument('--end_date', type=str, default=datetime.today().strftime('%Y-%m-%d'), help='End date in YYYY-MM-DD format')
     parser.add_argument('--tickers_list', nargs='+', default=['GPS'], help='List of ticker symbols separated by space')
-    parser.add_argument('--document_source', type=str, default='discountingcashflows', help='Source of document, either Aiera (aiera), Discounting Cashflows (discountingcashflows), or PDFs (pdfs)')
     parser.add_argument('--topic', type=str, default='margin', help='Key drivers topic, such as "margin" or "inflation"')
     parser.add_argument('--training_document_type', type=str, default='earnings call transcripts', help='Type of document for creating synthetic data for training')
     parser.add_argument('--base_model_for_training', type=str, default='roberta-base', help='Pretrained model for fine tuning on synthetic data, such as roberta-base')
@@ -49,32 +46,11 @@ def tokenize_text_into_sentences_and_filter_by_keyword(text):
     keyword_sentences = [sentence for sentence in sentences if MODEL_KEYWORD in sentence.lower()]
     return keyword_sentences
 
-def extract_text_from_pdf_and_tokenize_as_sentences_and_filter_by_keyword(path):
-    with fitz.open(path) as doc:
-        text = ""
-        for page in doc:
-            text += page.get_text()
-    return tokenize_text_into_sentences_and_filter_by_keyword(text)
-
-def extract_date_and_text_from_discounting_cashflow_api_call(ticker, quarter, year):
+def extract_date_and_text_from_api(ticker, quarter, year):
     url = f"https://discountingcashflows.com/api/transcript/{ticker}/{quarter}/{year}/"
     response = requests.get(url).json()
     date = response[0]['date']
     text = response[0]['content']
-    return date, text
-
-def extract_date_and_text_from_airea_api_call(ticker, start_date, end_date): #TODO: This returns only the last transcript in the time range...
-    url = "https://premium.aiera.com/api/events/"
-    params = {"start_date": start_date, "end_date": end_date, "ticker": ticker}
-    headers = {"X-API-Key": f"{AIERA_API_KEY}"}
-
-    events = requests.get(url, params=params, headers=headers).json()
-    for event in events:
-        if event["event_type"] == "earnings":
-            date = event["event_date"]
-            text = ""
-            for item in requests.get(f"{url}{event['event_id']}/transcript", headers=headers).json():
-                text += item["transcript"] + "\n"
     return date, text
 
 def analyze_results_from_pipeline_on_text_segments(pipeline, text_segments):
@@ -105,6 +81,8 @@ def create_csv_of_results(file, json):
     df = pd.DataFrame(json['extracts'])
     for header in json:
         df[header] = json[header]
+    if not os.path.exists('outputs'):
+        os.makedirs('outputs')
     df.to_csv(f'outputs/{file.split(".pdf")[0]}_output.csv', index=False)
 
 def calculate_document_sentiment_score(results_json):
@@ -160,16 +138,16 @@ def generate_synthetic_data(topic, document_type, sentiment, n_entries):
         max_tokens=4096,
         n=1
     )
-    print(response.choices[0].message.content)
+    
     return json.loads(response.choices[0].message.content)
 
 def generate_synthetic_data_for_topic_on_document_type(topic, document_type):
     data = {"data": []}
-    iterations = 20
+    iterations = 1
     for sentiment in ['pos', 'neg', 'neutral']:
         for i in list(range(iterations)):
             print(f"Processing {sentiment} batch {i+1} of {iterations}.")
-            data['data'].extend(generate_synthetic_data(topic, document_type, sentiment, 25)['data']) # TODO: Possibly "seed" with more generic neutral data
+            data['data'].extend(generate_synthetic_data(topic, document_type, sentiment, 1)['data'])
     return data
 
 def train_base_model_on_topic_for_document_type_with_synthetic_data(topic, document_type, base_model):
