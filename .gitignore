@@ -5,3 +5,4 @@ training/
 .env
 overview.csv
 synthetic_training_data.csv
+.DS_Store
