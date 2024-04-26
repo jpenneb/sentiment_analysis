@@ -1,0 +1,7 @@
+earnings_call_transcripts/
+outputs/
+overview_files_archive/
+training/
+.env
+overview.csv
+synthetic_training_data.csv

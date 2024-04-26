@@ -1,0 +1,21 @@
+{
+    "TRANSFORMER_PIPELINE": "text-classification",
+    "TRANSFORMER_MODEL": {
+        "FinBERT": "ProsusAI/finbert",
+        "BERT": "bert-base-uncased",
+        "RoBERTa": "roberta-base",
+        "ALBERT": "albert-base-v2",
+        "DistilBERT": "distilbert-base-uncased",
+        "Electra": "google/electra-small-discriminator",
+        "FinBERT_fine_tuned_on_margin": "./training/margin_model/fine_tuned/ProsusAI/finbert",
+        "BERT_fine_tuned_on_margin": "./training/margin_model/fine_tuned/bert-base-uncased/",
+        "RoBERTa_fine_tuned_on_margin": "./training/margin_model/fine_tuned/roberta-base/",
+        "ALBERT_fine_tuned_on_margin": "./training/margin_model/fine_tuned/albert-base-v2/",
+        "DistilBERT_fine_tuned_on_margin": "./training/margin_model/fine_tuned/distilbert-base-uncased/",
+        "Electra_fine_tuned_on_margin": "./training/margin_model/fine_tuned/google/electra-small-discriminator/",
+        "RoBERTa_fine_tuned_on_margin_added_samples": "./training/margin_model/fine_tuned/roberta-base_added_samples/"
+    },
+    "MODEL_KEYWORD": " ",
+    "EARNINGS_CALL_TRANSCRIPTS_DIRECTORY": "earnings_call_transcripts",
+    "OVERVIEW_FILE": "overview.csv"
+}
