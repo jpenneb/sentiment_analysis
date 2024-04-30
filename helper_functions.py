@@ -96,35 +96,37 @@ def create_csv_for_overview_analysis(OVERVIEW_FILE, json_of_results):
         writer.writerow([json_of_results["company_ticker"], json_of_results["date"], json_of_results["sentiment_score"]])
 
 def generate_synthetic_data(topic, document_type, sentiment, n_entries):
-    sentiment_prompt = {
-        "pos": "positive",
-        "neg": "negative",
-        "neutral": "a mix of neutral and irrelevant (such as 'Operator: Good afternoon, ladies and gentlemen')"
+    sentiment_descriptions = {
+        "pos": "clearly positive, indicating significant financial growth or success, such as 'The initiative led to a 15% increase in annual profit margins.'",
+        "neg": "explicitly negative, showing financial decline or challenges, such as 'The project resulted in a 20% decrease in annual revenue compared to last year.'",
+        "neutral": "either completely unrelated to any financial topics, like 'The meeting started at 3 PM.', or indirectly related but without any sentiment, such as 'The CEO discussed new office locations.'"
     }
 
     prompt_text = f'''
-    You are tasked with creating synthetic data intended for training an encoder model, which will be used to label sentiment for setences in {document_type}.
-    The synthetic data must be diverse, including an equal mix of qualititive commentary (i.e. lacking numeric metrics, such as "{topic} is doing well.") and quanititative commentary (i.e. reporting on numeric values and how they compare to previous reports, such as "{topic} was $3.5M, representing a Y/Y increase of 5%."). And it's important that for neutral examples, you include some completely irrelant sentences that are not related to {topic} at all.
+    Generate {n_entries} synthetic entries for training a sentiment analysis model. Each entry should focus on financial commentary about {topic} within {document_type}. Your entries should balance between qualitative and quantitative commentary. Ensure that examples vary by economic context, industry-specific terms, and include both straightforward and complex sentence structures.
 
-    Generate exactly {n_entries} entries of only {sentiment_prompt[sentiment]} financial commentary sentences about {topic} as seen in {document_type}.
-    Each entry should be structured as a JSON with "sentence" and "sentiment" keys, where the value of "sentiment" is {sentiment}. Do not include the entry numbers, only the dictionary structure.
-    Example:
+    - For pos entries, focus on significant financial improvements or successes.
+    - For neg entries, detail substantial financial setbacks or downturns.
+    - For neutral entries, mix completely off-topic sentences with ones that are contextually appropriate but sentiment-neutral.
+
+    Structure each entry as a JSON object with "sentence" and "sentiment" keys, labeling the sentiment as {sentiment}. Below are examples of what each entry might look like:
+
     {{
         "data":
             [
                 {{
-                    "sentence": "This is an example of a {sentiment_prompt[sentiment]} sentence about {topic} found in {document_type}.",
+                    "sentence": "This is an example of a {sentiment_descriptions[sentiment]} found in {document_type}.",
                     "sentiment": "{sentiment}"
                 }},
                 ...
                 {{
-                    "sentence": "This is an example of the nth {sentiment_prompt[sentiment]} sentence about {topic} found in {document_type}.",
+                    "sentence": "This example demonstrates a {sentiment_descriptions[sentiment]} about {topic} from a {document_type} context.",
                     "sentiment": "{sentiment}"
                 }}
             ]
     }}
 
-    Your response, structured as a dictionary:
+    Your response should be structured as a dictionary, ensuring all entries are plausible as part of financial discourse and maintain a high level of realism and believability.
     '''
     response = openai.chat.completions.create(
         model="gpt-3.5-turbo-0125",
@@ -138,16 +140,16 @@ def generate_synthetic_data(topic, document_type, sentiment, n_entries):
         max_tokens=4096,
         n=1
     )
-    
+    print(response.choices[0].message.content)
     return json.loads(response.choices[0].message.content)
 
 def generate_synthetic_data_for_topic_on_document_type(topic, document_type):
     data = {"data": []}
-    iterations = 1
+    iterations = 10
     for sentiment in ['pos', 'neg', 'neutral']:
         for i in list(range(iterations)):
             print(f"Processing {sentiment} batch {i+1} of {iterations}.")
-            data['data'].extend(generate_synthetic_data(topic, document_type, sentiment, 1)['data'])
+            data['data'].extend(generate_synthetic_data(topic, document_type, sentiment, 50)['data'])
     return data
 
 def train_base_model_on_topic_for_document_type_with_synthetic_data(topic, document_type, base_model):
@@ -159,7 +161,6 @@ def train_base_model_on_topic_for_document_type_with_synthetic_data(topic, docum
     }
 
     data_df = pd.DataFrame(data['data'])
-    
 
     data_df['sentiment'] = data_df['sentiment'].map(polarity_mapping)
 
