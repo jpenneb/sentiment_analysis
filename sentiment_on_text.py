@@ -1,5 +1,6 @@
 from datetime import datetime
 from helper_functions import OVERVIEW_FILE, analyze_text_and_create_output_for_on_the_fly_model, extract_date_and_text_from_api, initialize_overview_file, parse_arguments, train_base_model_on_topic_for_document_type_with_synthetic_data
+import os
 import time
 
 
@@ -9,7 +10,8 @@ def process_documents():
 
     start_year = start_date_obj.year
 
-    train_base_model_on_topic_for_document_type_with_synthetic_data(topic, training_document_type, base_model_for_training)
+    if not os.path.isdir(f"training/{topic}_on_{training_document_type.replace(' ', '_')}_model/fine_tuned/{base_model_for_training}_on_synthetic_data/"):
+        train_base_model_on_topic_for_document_type_with_synthetic_data(topic, training_document_type, base_model_for_training)
     
     for ticker in tickers_list:
         end_year = end_date_obj.year
