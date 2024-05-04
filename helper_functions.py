@@ -77,13 +77,48 @@ def generate_response_via_llm(OPENAI_API_KEY, analysis_results):
     )
     return response
 
-def create_csv_of_results(file, json):
-    df = pd.DataFrame(json['extracts'])
-    for header in json:
-        df[header] = json[header]
+def create_csv_of_results(file, results_json):
+    df = pd.DataFrame(results_json['extracts'])
+    for header in results_json:
+        df[header] = results_json[header]
     if not os.path.exists('outputs'):
         os.makedirs('outputs')
     df.to_csv(f'outputs/{file.split(".pdf")[0]}_output.csv', index=False)
+
+def correct_analysis_results(results, topic):
+    i = 0
+    for sentence in results:
+        if sentence['sentiment'] != 'LABEL_0':
+            if topic not in sentence['text']:
+                prompt_text = f'''
+                    You are a financial analyst specializing in analyzing {topic} sentiment as it pertains to key drivers of financial performance mentioned in financial documents. You are tasked with evaluating each "text" and corresponding "sentiment" label in the following JSON and identify and fix any incorrect sentiment labeling. The sentiment should be neutral (LABEL_0) unless the text is clearly related to {topic} commentary driving key financial performance.
+                    For example:
+                    {{"text": "Good afternoon", "sentiment": "LABEL_1", "confidence: "0.99987445"}}
+                    Should be:
+                     {{"text": "Good afternoon", "sentiment": "LABEL_0", "confidence: "0.99987445"}}
+                     Since this sentence has nothing to do with sentiment related to financial key drivers for {topic}. Your fix will be based on relevance to key financial performance drivers based on the text and the assigned sentiment label. You understand the following mapping of sentiment labels: LABEL_0 is neutral, LABEL_1 is positive, LABEL_2 is negative.
+                    JSON for fixing:
+                    {sentence}
+                    Fixed JSON:
+                    '''
+                response = openai.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    response_format={"type": "json_object"},
+                    messages=[
+                                {
+                                    "role": "system",
+                                    "content": prompt_text
+                                }
+                            ],
+                    max_tokens=4096,
+                    n=1
+                )
+                try:
+                    results[i] = json.loads(response.choices[0].message.content)
+                except:
+                    print(response.choices[0].finish_reason)
+        i += 1
+    return results
 
 def calculate_document_sentiment_score(results_json):
     num_positive = sum(result['sentiment'].lower() in ('positive', 'label_1') for result in results_json)
@@ -95,38 +130,43 @@ def create_csv_for_overview_analysis(OVERVIEW_FILE, json_of_results):
         writer = csv.writer(file)
         writer.writerow([json_of_results["company_ticker"], json_of_results["date"], json_of_results["sentiment_score"]])
 
-def generate_synthetic_data(topic, document_type, sentiment, n_entries):
+def generate_synthetic_data(topic, document_type, sentiment, type, n_entries):
     sentiment_descriptions = {
-        "pos": "clearly positive, indicating significant financial growth or success, such as 'The initiative led to a 15% increase in annual profit margins.'",
-        "neg": "explicitly negative, showing financial decline or challenges, such as 'The project resulted in a 20% decrease in annual revenue compared to last year.'",
+        "pos": f"clearly positive, relevant as a 'key driver' of financial growth or success, such as 'We noted solid {topic}' or 'The initiative led to a 15% increase in annual {topic}s.'",
+        "neg": "explicitly negative, in the context of a 'key driver' of financial decline or challenges, such as 'This quarter was not so great for {topic}' or 'The project resulted in a 20% decrease in annual {topic} compared to last year.'",
         "neutral": "either completely unrelated to any financial topics, like 'The meeting started at 3 PM.', or indirectly related but without any sentiment, such as 'The CEO discussed new office locations.'"
     }
 
-    prompt_text = f'''
-    Generate {n_entries} synthetic entries for training a sentiment analysis model. Each entry should focus on financial commentary about {topic} within {document_type}. Your entries should balance between qualitative and quantitative commentary. Ensure that examples vary by economic context, industry-specific terms, and include both straightforward and complex sentence structures.
+    types = {
+        "quantitative": f"i.e. reporting on numeric values and how they compare to previous reports, such as '{topic} was $3.5M, representing a Y/Y increase of 5%.'",
+        "qualitative": f"i.e. without numeric metrics, such as '{topic} is doing well.'"
+    }
 
-    - For pos entries, focus on significant financial improvements or successes.
-    - For neg entries, detail substantial financial setbacks or downturns.
-    - For neutral entries, mix completely off-topic sentences with ones that are contextually appropriate but sentiment-neutral.
+    prompt_text =  f'''
+    You are tasked with creating realistic and believable synthetic data intended for fine tuning a pretrained roBERTa model, which will be used to label sentiment for setences in {document_type}.
 
-    Structure each entry as a JSON object with "sentence" and "sentiment" keys, labeling the sentiment as {sentiment}. Below are examples of what each entry might look like:
+    The synthetic data must be as diverse and as varied as possible as well as focused on being {type}, {types[type]}. And it's important that for neutral examples, you include some completely irrelant sentences that are not related to {topic} at all.
 
+    Generate exactly {n_entries} entries of only {sentiment_descriptions[sentiment]} sentences about {topic} as would be found in {document_type}.
+    
+    Each entry should be structured as a JSON with "sentence" and "sentiment" keys, where the value of "sentiment" is {sentiment}. Do not include the entry numbers, only the dictionary structure.
+    Example:
     {{
         "data":
             [
                 {{
-                    "sentence": "This is an example of a {sentiment_descriptions[sentiment]} found in {document_type}.",
+                    "sentence": "This is an example of a {sentiment_descriptions[sentiment]} sentence about {topic} found in {document_type}.",
                     "sentiment": "{sentiment}"
                 }},
                 ...
                 {{
-                    "sentence": "This example demonstrates a {sentiment_descriptions[sentiment]} about {topic} from a {document_type} context.",
+                    "sentence": "This is an example of the nth {sentiment_descriptions[sentiment]} sentence about {topic} found in {document_type}.",
                     "sentiment": "{sentiment}"
                 }}
             ]
     }}
 
-    Your response should be structured as a dictionary, ensuring all entries are plausible as part of financial discourse and maintain a high level of realism and believability.
+    Your response, structured as a dictionary:
     '''
     response = openai.chat.completions.create(
         model="gpt-3.5-turbo-0125",
@@ -145,11 +185,12 @@ def generate_synthetic_data(topic, document_type, sentiment, n_entries):
 
 def generate_synthetic_data_for_topic_on_document_type(topic, document_type):
     data = {"data": []}
-    iterations = 10
+    iterations = 15
     for sentiment in ['pos', 'neg', 'neutral']:
-        for i in list(range(iterations)):
-            print(f"Processing {sentiment} batch {i+1} of {iterations}.")
-            data['data'].extend(generate_synthetic_data(topic, document_type, sentiment, 50)['data'])
+        for type in ['quantitative', 'qualitative']:
+            for i in list(range(iterations)):
+                print(f"Processing {sentiment} {type} batch {i+1} of {iterations}.")
+                data['data'].extend(generate_synthetic_data(topic, document_type, sentiment, type, 50)['data'])
     return data
 
 def train_base_model_on_topic_for_document_type_with_synthetic_data(topic, document_type, base_model):
@@ -210,15 +251,16 @@ def train_base_model_on_topic_for_document_type_with_synthetic_data(topic, docum
     model.save_pretrained(f"./training/{topic}_on_{document_type.replace(' ', '_')}_model/fine_tuned/{base_model}_on_synthetic_data/")
     tokenizer.save_pretrained(f"./training/{topic}_on_{document_type.replace(' ', '_')}_model/fine_tuned/{base_model}_on_synthetic_data/")
 
-def analyze_text_and_create_output(ticker, date, text_for_pipeline_analysis, model_name, model):
+def analyze_text_and_create_output(ticker, date, text_for_pipeline_analysis, model_name, model, topic):
     analysis_results = analyze_results_from_pipeline_on_text_segments(pipeline(TRANSFORMER_PIPELINE, model=model), text_for_pipeline_analysis)
-    sentiment_score = calculate_document_sentiment_score(analysis_results)
+    corrected_analysis_results = correct_analysis_results(analysis_results, topic)
+    sentiment_score = calculate_document_sentiment_score(corrected_analysis_results)
     json_of_results = {
             "company_ticker": f"{model_name}_{ticker}",
             "date": date,
             "sentiment_score": sentiment_score,
-            "extracts": analysis_results,
-            "summary": "response_via_llm(OPENAI_API_KEY, analysis_results).choices[0].message.content"
+            "extracts": analysis_results
+            # "summary": "response_via_llm(OPENAI_API_KEY, analysis_results).choices[0].message.content"
         }
     create_csv_of_results(f"{model_name}_{ticker}_{date}", json_of_results)
     create_csv_for_overview_analysis(OVERVIEW_FILE, json_of_results)
@@ -227,7 +269,7 @@ def analyze_text_and_create_output_for_on_the_fly_model(ticker, date, text, topi
     text_for_pipeline_analysis = tokenize_text_into_sentences_and_filter_by_keyword(text)
     model_name = f"{base_model}_fine_tuned_on_synthetic_{document_type.replace(' ', '_')}_{topic}_data"
     model = f"./training/{topic}_on_{document_type.replace(' ', '_')}_model/fine_tuned/{base_model}_on_synthetic_data/"
-    analyze_text_and_create_output(ticker, date, text_for_pipeline_analysis, model_name, model)
+    analyze_text_and_create_output(ticker, date, text_for_pipeline_analysis, model_name, model, topic)
 
 def analyze_text_and_create_output_for_list_of_fine_tuned_models(ticker, date, text):
     text_for_pipeline_analysis = tokenize_text_into_sentences_and_filter_by_keyword(text)
